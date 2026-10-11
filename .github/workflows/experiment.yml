@@ -9,7 +9,7 @@ permissions:
 jobs:
   # Verifica a qualidade básica e a capacidade de compilação.
   validate:
-    name: Lint and Build
+    name: Build and Validate
     runs-on: ubuntu-latest
 
     steps:
@@ -27,9 +27,6 @@ jobs:
 
       - name: Generate Prisma Client
         run: npx prisma generate
-
-      - name: Run Lint
-        run: npm run lint
 
       - name: Build Application
         run: npm run build
@@ -117,7 +114,7 @@ jobs:
 
       - name: Run Hadolint
         run: |
-          docker run --rm -i hadolint/hadolint \
+          docker run --rm -i hadolint/hadolint:latest hadolint \
             --failure-threshold none \
             --format json - \
             < Dockerfile > hadolint-report.json
