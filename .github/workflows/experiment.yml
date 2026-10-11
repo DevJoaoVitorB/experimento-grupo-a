@@ -59,7 +59,7 @@ jobs:
               --config p/typescript \
               --config p/nodejs \
               --config p/jwt \
-              --config sast-rs01-rs07.yml \
+              --config /src/.github/workflows/sast-rs01-rs07-rules.yml \
               --json \
               --output sast-report.json \
               .
