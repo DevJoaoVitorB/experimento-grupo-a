@@ -129,29 +129,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate DAST configuration
-        run: |
-          test -f Dockerfile
-          test -f docker-compose.yml
-          test -f .github/workflows/openapi.yml
-
-      - name: Start API with Docker Compose
+      - name: Start API
         run: docker compose up --build -d
 
-      - name: Wait for API health
+      - name: Wait for API
         shell: bash
         run: |
           for attempt in {1..30}; do
-            if curl --fail --silent http://localhost:3000/health; then
-              echo "API is responding."
+            if curl -fsS http://localhost:3000/health >/dev/null; then
               exit 0
             fi
-
-            echo "Waiting for API... attempt ${attempt}/30"
             sleep 2
           done
 
-          echo "API did not become available."
           docker compose logs
           exit 1
 
@@ -160,22 +150,25 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set +e
+          mkdir -p "$RUNNER_TEMP/zap-reports"
+          chmod 777 "$RUNNER_TEMP/zap-reports"
 
+          set +e
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
-            -v "$PWD:/zap/wrk/:rw" \
+            -v "$PWD:/zap/wrk/:ro" \
+            -v "$RUNNER_TEMP/zap-reports:/zap/reports/:rw" \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-api-scan.py \
               -t /zap/wrk/.github/workflows/openapi.yml \
               -f openapi \
-              -r dast-report.html \
-              -J dast-report.json \
-              -w dast-report.md \
+              -r /zap/reports/dast-report.html \
+              -J /zap/reports/dast-report.json \
+              -w /zap/reports/dast-report.md \
               -I
 
           result=$?
-          echo "$result" > zap-exit-code.txt
+          echo "$result" > "$RUNNER_TEMP/zap-reports/zap-exit-code.txt"
           echo "OWASP ZAP exit code: $result"
           exit "$result"
 
@@ -184,18 +177,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dast-report
-          path: |
-            dast-report.html
-            dast-report.json
-            dast-report.md
-            zap-exit-code.txt
+          path: ${{ runner.temp }}/zap-reports/
           if-no-files-found: warn
           retention-days: 90
 
-      - name: Show API logs
-        if: always()
-        run: docker compose logs || true
-
-      - name: Stop API containers
+      - name: Stop API
         if: always()
         run: docker compose down --volumes --remove-orphans
