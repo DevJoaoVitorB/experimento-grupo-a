@@ -1,0 +1,315 @@
+rules:
+  # RS01 - Controle de acesso e autorização (OWASP A01)
+  - id: rs01-prisma-resource-id-from-request
+    message: >-
+      Identificador de recurso derivado diretamente da requisição
+      em operação Prisma. Verifique se a API valida a autorização
+      e a propriedade do recurso antes de acessá-lo ou alterá-lo.
+    severity: WARNING
+    languages:
+      - javascript
+      - typescript
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - pattern: '$REQ.params.$FIELD'
+          - pattern: '$REQ.query.$FIELD'
+          - pattern: '$REQ.body.$FIELD'
+    pattern-sinks:
+      - pattern-either:
+          - pattern: '$PRISMA.$MODEL.findUnique({ ..., where: { ..., id: $REQ.params.$FIELD, ... }, ... })'
+          - pattern: '$PRISMA.$MODEL.findUnique({ ..., where: { ..., id: $REQ.query.$FIELD, ... }, ... })'
+          - pattern: '$PRISMA.$MODEL.findUnique({ ..., where: { ..., id: $REQ.body.$FIELD, ... }, ... })'
+          - pattern: '$PRISMA.$MODEL.findFirst({ ..., where: { ..., id: $REQ.params.$FIELD, ... }, ... })'
+          - pattern: '$PRISMA.$MODEL.update({ ..., where: { ..., id: $REQ.params.$FIELD, ... }, ... })'
+          - pattern: '$PRISMA.$MODEL.delete({ ..., where: { ..., id: $REQ.params.$FIELD, ... }, ... })'
+
+  - id: rs01-prisma-request-body-mass-assignment
+    message: >-
+      Corpo da requisição passado diretamente para uma operação de
+      escrita Prisma. Verifique se os campos são permitidos e se
+      dados sensíveis ou campos de autorização são excluídos.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: '$PRISMA.$MODEL.create({ ..., data: $REQ.body, ... })'
+          - pattern: '$PRISMA.$MODEL.update({ ..., data: $REQ.body, ... })'
+          - pattern: '$PRISMA.$MODEL.upsert({ ..., create: $REQ.body, ..., update: $REQ.body, ... })'
+
+  # RS02 - Configuração segura (OWASP A02)
+  - id: rs02-hardcoded-jwt-secret
+    message: >-
+      Segredo JWT aparentemente fixo no código. Utilize configuração
+      segura por ambiente ou um gerenciador de segredos.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'jwt.sign($PAYLOAD, "...")'
+      - pattern: 'jwt.verify($TOKEN, "...")'
+      - pattern: 'jwt.sign($PAYLOAD, ''...'')'
+      - pattern: 'jwt.verify($TOKEN, ''...'')'
+      - pattern: 'jsonwebtoken.sign($PAYLOAD, "...")'
+      - pattern: 'jsonwebtoken.verify($TOKEN, "...")'
+
+  - id: rs02-secret-environment-fallback
+    message: >-
+      Segredo com valor literal de fallback. Evite permitir que a
+      aplicação utilize um segredo previsível quando a variável de
+      ambiente estiver ausente.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'process.env.$NAME || "..."'
+      - pattern: 'process.env.$NAME || ''...'''
+      - pattern: 'process.env.$NAME ?? "..."'
+      - pattern: 'process.env.$NAME ?? ''...'''
+
+  - id: rs02-permissive-cors
+    message: >-
+      CORS configurado com origem universal. Verifique se essa
+      configuração é adequada ao contexto da API e às credenciais.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'cors({ ..., origin: "*", ... })'
+      - pattern: "cors({ ..., origin: '*', ... })"
+      - pattern: 'res.setHeader("Access-Control-Allow-Origin", "\*")'
+      - pattern: 'res.header("Access-Control-Allow-Origin", "\*")'
+
+  - id: rs02-environment-exposure
+    message: >-
+      Possível exposição de variáveis de ambiente em resposta HTTP.
+      Verifique se segredos e configurações internas podem ser revelados.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'res.send(process.env)'
+      - pattern: 'res.json(process.env)'
+      - pattern: 'res.end(JSON.stringify(process.env))'
+
+  - id: rs02-disabled-tls-verification
+    message: >-
+      Verificação de certificado TLS aparentemente desativada.
+      Isso pode permitir conexões vulneráveis a interceptação.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'new https.Agent({ ..., rejectUnauthorized: false, ... })'
+      - pattern: 'new tls.TLSSocket($SOCKET, { ..., rejectUnauthorized: false, ... })'
+      - pattern: 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"'
+      - pattern: 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = ''0'''
+
+  # RS04 - Uso de credenciais (OWASP A04)
+  - id: rs04-weak-password-hash
+    message: >-
+      Algoritmo de hash fraco utilizado em possível contexto de
+      credenciais. Prefira um algoritmo próprio para senhas, como
+      Argon2id, scrypt ou bcrypt com parâmetros adequados.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'crypto.createHash("md5")'
+      - pattern: 'crypto.createHash(''md5'')'
+      - pattern: 'crypto.createHash("sha1")'
+      - pattern: 'crypto.createHash(''sha1'')'
+
+  - id: rs04-password-persisted-without-visible-hash
+    message: >-
+      Senha recebida da requisição aparentemente persistida sem
+      hashing visível na expressão. Verifique o fluxo completo antes
+      de confirmar a vulnerabilidade.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $PRISMA.$MODEL.create({
+                ...,
+                data: { ..., password: $REQ.body.password, ... },
+                ...
+              })
+          - pattern: |
+              $PRISMA.$MODEL.create({
+                ...,
+                data: { ..., senha: $REQ.body.senha, ... },
+                ...
+              })
+          - pattern: |
+              $PRISMA.$MODEL.update({
+                ...,
+                data: { ..., password: $REQ.body.password, ... },
+                ...
+              })
+          - pattern: |
+              $PRISMA.$MODEL.update({
+                ...,
+                data: { ..., senha: $REQ.body.senha, ... },
+                ...
+              })
+
+  - id: rs04-password-in-response
+    message: >-
+      Campo de senha aparentemente incluído em resposta HTTP.
+      Retorne somente os dados públicos necessários ao cliente.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'res.json({ ..., password: $VALUE, ... })'
+      - pattern: 'res.json({ ..., senha: $VALUE, ... })'
+      - pattern: 'res.send({ ..., password: $VALUE, ... })'
+      - pattern: 'res.send({ ..., senha: $VALUE, ... })'
+
+  - id: rs04-password-logging
+    message: >-
+      Possível registro de senha em log. Evite registrar credenciais
+      e outros dados sensíveis.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'console.log(..., $REQ.body.password, ...)'
+      - pattern: 'console.log(..., $REQ.body.senha, ...)'
+      - pattern: 'console.error(..., $REQ.body.password, ...)'
+      - pattern: 'console.error(..., $REQ.body.senha, ...)'
+
+  # RS05 - Validação e sanitização de entradas (OWASP A05)
+  - id: rs05-prisma-raw-unsafe
+    message: >-
+      Uso de operação SQL bruta potencialmente insegura do Prisma.
+      Verifique se entradas externas podem alterar a consulta SQL.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: '$PRISMA.$queryRawUnsafe(...)'
+      - pattern: '$PRISMA.$executeRawUnsafe(...)'
+
+  - id: rs05-request-input-to-dangerous-operation
+    message: >-
+      Entrada HTTP utilizada em operação potencialmente perigosa.
+      Valide e restrinja os dados conforme o contexto de uso.
+    severity: WARNING
+    languages: [javascript, typescript]
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: '$REQ.body'
+              - pattern: '$REQ.query.$FIELD'
+              - pattern: '$REQ.params.$FIELD'
+    pattern-sinks:
+      - pattern: 'eval($VALUE)'
+      - pattern: 'child_process.exec($VALUE, ...)'
+      - pattern: 'child_process.execSync($VALUE, ...)'
+      - pattern: 'new RegExp($VALUE, ...)'
+
+  # RS06 - Autenticação e identificação (OWASP A07)
+  - id: rs06-jwt-decode-without-verification
+    message: >-
+      jwt.decode não valida a assinatura do token. Não o utilize
+      isoladamente para autenticar ou autorizar requisições.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'jwt.decode($TOKEN, ...)'
+      - pattern: 'jsonwebtoken.decode($TOKEN, ...)'
+
+  - id: rs06-jwt-none-algorithm
+    message: >-
+      Algoritmo JWT none explicitamente configurado. Não aceite tokens
+      sem assinatura para autenticação.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'jwt.verify($TOKEN, $SECRET, { ..., algorithms: ["none"], ... })'
+      - pattern: 'jwt.verify($TOKEN, $SECRET, { ..., algorithms: [''none''], ... })'
+      - pattern: 'jwt.sign($PAYLOAD, $SECRET, { ..., algorithm: "none", ... })'
+      - pattern: 'jwt.sign($PAYLOAD, $SECRET, { ..., algorithm: ''none'', ... })'
+
+  - id: rs06-jwt-sign-without-expiration
+    message: >-
+      Emissão de JWT sem expiração visível nas opções. Verifique se
+      o token tem duração limitada e se a política de renovação é segura.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.sign($PAYLOAD, $SECRET)'
+          - pattern: 'jsonwebtoken.sign($PAYLOAD, $SECRET)'
+          - pattern: 'jwt.sign($PAYLOAD, $SECRET, $OPTIONS)'
+          - pattern: 'jsonwebtoken.sign($PAYLOAD, $SECRET, $OPTIONS)'
+      - pattern-not: 'jwt.sign($PAYLOAD, $SECRET, { ..., expiresIn: $EXP, ... })'
+      - pattern-not: 'jsonwebtoken.sign($PAYLOAD, $SECRET, { ..., expiresIn: $EXP, ... })'
+
+  - id: rs06-insecure-cookie
+    message: >-
+      Cookie configurado sem atributo de segurança visível. Verifique
+      HttpOnly, Secure e SameSite conforme o cenário de implantação.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: 'res.cookie($NAME, $VALUE)'
+          - pattern: 'res.cookie($NAME, $VALUE, $OPTIONS)'
+      - pattern-not: |
+          res.cookie($NAME, $VALUE, {
+            ..., httpOnly: true, ..., secure: true, ..., sameSite: "strict", ...
+          })
+      - pattern-not: |
+          res.cookie($NAME, $VALUE, {
+            ..., httpOnly: true, ..., secure: true, ..., sameSite: "lax", ...
+          })
+      - pattern-not: |
+          res.cookie($NAME, $VALUE, {
+            ..., httpOnly: true, ..., secure: true, ..., sameSite: "none", ...
+          })
+
+  - id: rs06-account-enumeration-message
+    message: >-
+      Mensagem de autenticação pode revelar se uma conta existe.
+      Prefira respostas consistentes para usuário inexistente e senha incorreta.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-regex: (?i)(usuário não encontrado|usuario nao encontrado|email não cadastrado|email nao cadastrado|user not found|email not found)
+
+  # RS07 - Tratamento de exceções e erros (OWASP A10)
+  - id: rs07-stack-trace-in-response
+    message: >-
+      Possível exposição de stack trace em resposta HTTP. Retorne uma
+      mensagem genérica ao cliente e registre detalhes internamente.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'res.json({ ..., stack: $ERR.stack, ... })'
+      - pattern: 'res.send({ ..., stack: $ERR.stack, ... })'
+      - pattern: 'res.status($STATUS).json({ ..., stack: $ERR.stack, ... })'
+
+  - id: rs07-error-message-in-response
+    message: >-
+      Possível exposição de mensagem interna de erro ao cliente.
+      Verifique se detalhes sensíveis podem ser revelados.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: 'res.json({ ..., error: $ERR.message, ... })'
+      - pattern: 'res.json({ ..., message: $ERR.message, ... })'
+      - pattern: 'res.send({ ..., error: $ERR.message, ... })'
+      - pattern: 'res.send({ ..., message: $ERR.message, ... })'
+
+  - id: rs07-empty-catch
+    message: >-
+      Bloco catch vazio pode ocultar falhas e deixar o sistema em
+      estado inesperado. Trate ou propague a exceção adequadamente.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: |
+          try {
+            ...
+          } catch ($ERR) {
+          }
+      - pattern: |
+          try {
+            ...
+          } catch ($ERR) {
+            ;
+          }

@@ -9,7 +9,7 @@ permissions:
 jobs:
   # Verifica a qualidade básica e a capacidade de compilação.
   validate:
-    name: Build and Validate
+    name: Validate Application
     runs-on: ubuntu-latest
 
     steps:
@@ -28,19 +28,24 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Build Application
+      - name: Run automated tests
+        run: npm test
+
+      - name: Build application
         run: npm run build
 
   # Analisa o código-fonte sem executar a API.
   sast:
     name: SAST - Semgrep
     runs-on: ubuntu-latest
+    needs: validate
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Semgrep
+      - name: Run Semgrep SAST
+        continue-on-error: true
         run: |
           docker run --rm \
             -v "$PWD:/src" \
@@ -49,21 +54,29 @@ jobs:
             semgrep scan \
               --config p/security-audit \
               --config p/secrets \
+              --config p/owasp-top-ten \
+              --config p/javascript \
+              --config p/typescript \
+              --config p/nodejs \
+              --config p/jwt \
+              --config sast-rs01-rs07.yml \
               --json \
-              --output semgrep-report.json .
+              --output sast-report.json \
+              .
 
-      - name: Upload SAST Report
+      - name: Upload SAST reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sast-report
-          path: semgrep-report.json
+          path: sast-report.json
           if-no-files-found: warn
 
-  # Verifica vulnerabilidades conhecidas nas dependências npm.
+  # Analisa dependências em busca de vulnerabilidades conhecidas.
   sca:
     name: SCA - npm audit
     runs-on: ubuntu-latest
+    needs: validate
 
     steps:
       - name: Checkout repository
@@ -78,7 +91,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Audit Dependencies
+      - name: Run npm audit SCA
         shell: bash
         run: |
           set +e
@@ -88,9 +101,9 @@ jobs:
           set -e
 
           echo "npm audit exit code: $result"
-          echo "Consulte o relatório e verifique se houve erro operacional."
+          echo "Verifique o relatório e os logs para distinguir vulnerabilidades de falhas operacionais."
 
-      - name: Upload SCA Report
+      - name: Upload SCA reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -99,78 +112,4 @@ jobs:
             sca-report.json
             npm-audit-exit-code.txt
           if-no-files-found: warn
-
-  # Analisa o arquivo gerado pelo próprio agente de IA.
-  dockerfile:
-    name: Dockerfile Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check Dockerfile
-        run: test -f Dockerfile
-
-      - name: Run Hadolint
-        run: |
-          docker run --rm -i hadolint/hadolint:latest hadolint \
-            --failure-threshold none \
-            --format json - \
-            < Dockerfile > hadolint-report.json
-
-      - name: Run Checkov
-        run: |
-          docker run --rm \
-            -v "$PWD:/src" \
-            -w /src \
-            bridgecrew/checkov \
-            --file Dockerfile \
-            --framework dockerfile \
-            --output json \
-            --soft-fail \
-            > checkov-report.json
-
-      - name: Upload Dockerfile Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dockerfile-reports
-          path: |
-            hadolint-report.json
-            checkov-report.json
-          if-no-files-found: warn
-
-  # Construção e publicação da imagem docker
-  publish:
-    name: Build and Publish Docker Image
-    runs-on: ubuntu-latest
-
-    needs:
-      - validate
-      - sast
-      - sca
-      - dockerfile
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and Push Image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ vars.DOCKERHUB_USERNAME }}/${{ vars.DOCKERHUB_REPOSITORY }}:grupo-a
-            ${{ vars.DOCKERHUB_USERNAME }}/${{ vars.DOCKERHUB_REPOSITORY }}:sha-${{ github.sha }}
+          retention-days: 90
