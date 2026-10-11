@@ -1,0 +1,163 @@
+
+openapi: 3.0.3
+
+info:
+  title: Authentication API
+  version: 1.0.0
+  description: Contrato de teste da API de autenticação do experimento de segurança
+
+servers:
+  - url: http://host.docker.internal:3000
+
+tags:
+  - name: Health
+  - name: Authentication
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Verifica o estado da API
+      operationId: healthCheck
+      responses:
+        "200":
+          description: API disponível
+
+  /auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Cadastra um usuário
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                  minLength: 1
+      responses:
+        "201":
+          description: Usuário cadastrado
+        "400":
+          description: Dados inválidos
+        "409":
+          description: Usuário já cadastrado
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Autentica um usuário
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Autenticação realizada
+        "400":
+          description: Dados inválidos
+        "401":
+          description: Credenciais inválidas
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Renova os tokens de autenticação
+      operationId: refreshTokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Tokens renovados
+        "400":
+          description: Requisição inválida
+        "401":
+          description: Refresh token inválido
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Encerra a sessão do usuário
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Sessão encerrada
+        "400":
+          description: Requisição inválida
+        "401":
+          description: Não autenticado
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Consulta o perfil do usuário autenticado
+      operationId: getAuthenticatedUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Perfil do usuário
+        "401":
+          description: Não autenticado
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
