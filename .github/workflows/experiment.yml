@@ -121,6 +121,10 @@ jobs:
     needs: validate
     timeout-minutes: 30
 
+    env:
+      JWT_ACCESS_SECRET: "dast-test-access-secret-CHANGE-ME-123456789"
+      JWT_REFRESH_SECRET: "dast-test-refresh-secret-CHANGE-ME-123456789"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -194,4 +198,9 @@ jobs:
 
       - name: Stop API containers
         if: always()
-        run: docker compose down --volumes --remove-orphans
+        run: |
+          docker compose down \
+            --volumes \
+            --remove-orphans \
+            --env JWT_ACCESS_SECRET="$JWT_ACCESS_SECRET" \
+            --env JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET"
