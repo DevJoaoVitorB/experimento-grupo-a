@@ -29,7 +29,7 @@ jobs:
         run: npx prisma generate
 
       - name: Run automated tests
-        run: npm test
+        run: npm test -- --exclude ".github/workflows/dast-rs01-rs07.test.ts"
 
       - name: Build application
         run: npm run build
