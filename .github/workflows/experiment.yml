@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  # Verifica a qualidade básica e a capacidade de compilação.
+  # 1. Valida a aplicação antes das análises de segurança.
   validate:
     name: Validate Application
     runs-on: ubuntu-latest
@@ -34,9 +34,9 @@ jobs:
       - name: Build application
         run: npm run build
 
-  # Analisa o código-fonte sem executar a API.
+  # 2. Analisa o código-fonte, sem executar a API, em busca de possíveis vulnerabilidades. 
   sast:
-    name: SAST - Semgrep
+    name: SAST (Semgrep)
     runs-on: ubuntu-latest
     needs: validate
 
@@ -44,7 +44,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Semgrep SAST
+      - name: Run Semgrep
         continue-on-error: true
         run: |
           docker run --rm \
@@ -59,11 +59,12 @@ jobs:
               --config p/typescript \
               --config p/nodejs \
               --config p/jwt \
-              --config /src/.github/workflows/sast-rs01-rs07-rules.yml \
+              --config /src/.github/workflows/sast-rs01-rs07.yml \
               --json \
               --output sast-report.json \
               .
 
+      # Armazena os resultados e o código de saída da análise.
       - name: Upload SAST reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,9 +73,9 @@ jobs:
           path: sast-report.json
           if-no-files-found: warn
 
-  # Analisa dependências em busca de vulnerabilidades conhecidas.
+  # 3. Verifica dependências em busca de vulnerabilidades conhecidas.
   sca:
-    name: SCA - npm audit
+    name: SCA (npm audit)
     runs-on: ubuntu-latest
     needs: validate
 
@@ -91,6 +92,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Gera o relatório mesmo quando o npm audit encontra problemas.
       - name: Run npm audit SCA
         shell: bash
         run: |
@@ -101,8 +103,8 @@ jobs:
           set -e
 
           echo "npm audit exit code: $result"
-          echo "Verifique o relatório e os logs para distinguir vulnerabilidades de falhas operacionais."
 
+      # Armazena os resultados e o código de saída da análise.
       - name: Upload SCA reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,13 +116,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-  # Analisa a API em execução em busca de vulnerabilidades de segurança.
+  # 4. Analisa a API em execução em busca de vulnerabilidades de segurança.
   dast:
-    name: DAST - OWASP ZAP
+    name: DAST (OWASP ZAP + Complementary Tests)
     runs-on: ubuntu-latest
     needs: validate
     timeout-minutes: 30
 
+    # Define segredos exclusivos do ambiente de teste.
     env:
       JWT_ACCESS_SECRET: "dast-test-access-secret-CHANGE-ME-123456789"
       JWT_REFRESH_SECRET: "dast-test-refresh-secret-CHANGE-ME-123456789"
@@ -128,10 +131,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      
+      # Inicia a API em contêineres Docker.
       - name: Start API
         run: docker compose up --build -d
 
+      # Aguarda a API responder antes de iniciar os testes.
       - name: Wait for API
         shell: bash
         run: |
@@ -145,15 +150,19 @@ jobs:
           docker compose logs
           exit 1
 
-      - name: Run OWASP ZAP API Scan
-        id: zap
-        continue-on-error: true
-        shell: bash
+      # Prepara a pasta para armazenar os relatórios.
+      - name: Prepare DAST reports
         run: |
           mkdir -p "$RUNNER_TEMP/zap-reports"
           chmod 777 "$RUNNER_TEMP/zap-reports"
 
+      # Examina a API com base na especificação OpenAPI.
+      - name: Run OWASP ZAP
+        continue-on-error: true
+        shell: bash
+        run: |
           set +e
+
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
             -v "$PWD:/zap/wrk/:ro" \
@@ -170,8 +179,26 @@ jobs:
           result=$?
           echo "$result" > "$RUNNER_TEMP/zap-reports/zap-exit-code.txt"
           echo "OWASP ZAP exit code: $result"
-          exit "$result"
+          exit 0
 
+      # Testa comportamentos específicos das recomendações RS01–RS07.
+      - name: Run complementary tests
+        continue-on-error: true
+        shell: bash
+        env:
+          DAST_BASE_URL: http://localhost:3000
+          DAST_REPORT_PATH: ${{ runner.temp }}/zap-reports/dast-rs01-rs07-report.json
+        run: |
+          set +e
+
+          node --experimental-strip-types .github/workflows/dast-rs01-rs07.test.ts
+
+          result=$?
+          echo "$result" > "$RUNNER_TEMP/zap-reports/complementary-exit-code.txt"
+          echo "Complementary tests exit code: $result"
+          exit 0
+
+      # Armazena os resultados e o código de saída da análise.
       - name: Upload DAST reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -181,6 +208,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+      # Encerra os contêineres e remove os volumes de teste.
       - name: Stop API
         if: always()
         run: docker compose down --volumes --remove-orphans
